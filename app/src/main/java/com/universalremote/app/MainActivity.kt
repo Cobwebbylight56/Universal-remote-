@@ -22,6 +22,7 @@ import com.universalremote.app.model.Device
 import com.universalremote.app.model.DeviceStore
 import com.universalremote.app.ui.CodesScreen
 import com.universalremote.app.ui.DeviceListScreen
+import com.universalremote.app.ui.DiagnoseScreen
 import com.universalremote.app.ui.EditDeviceScreen
 import com.universalremote.app.ui.RemoteScreen
 
@@ -41,6 +42,7 @@ sealed interface Screen {
     data class Remote(val id: String) : Screen
     data class Edit(val id: String?, val draft: Device? = null) : Screen
     data class Codes(val id: String) : Screen
+    data class Diagnose(val host: String = "") : Screen
 }
 
 class AppState(private val store: DeviceStore) {
@@ -99,6 +101,7 @@ fun App(app: AppState) {
             val d = app.device(s.id)
             if (d != null) CodesScreen(app, d) else LaunchedEffect(s) { app.back() }
         }
+        is Screen.Diagnose -> DiagnoseScreen(app, s.host)
     }
 }
 

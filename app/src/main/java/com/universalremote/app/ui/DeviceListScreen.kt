@@ -27,6 +27,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -41,10 +42,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.universalremote.app.AppState
 import com.universalremote.app.Screen
+import com.universalremote.app.control.Diagnostics
 import com.universalremote.app.control.Discovery
+import com.universalremote.app.control.UpnpDevice
 import com.universalremote.app.control.FoundTv
 import com.universalremote.app.model.Device
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -53,22 +57,32 @@ fun DeviceListScreen(app: AppState) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val found = remember { mutableStateListOf<FoundTv>() }
+    val others = remember { mutableStateListOf<UpnpDevice>() }
     var scanning by remember { mutableStateOf(false) }
     var scanMessage by remember { mutableStateOf<String?>(null) }
 
     fun scan() {
         if (scanning) return
         found.clear()
+        others.clear()
         scanning = true
         scanMessage = null
         scope.launch {
             try {
-                Discovery.scan(context) { tv ->
-                    val known = app.devices.any { it.host == tv.host && it.type == tv.type }
-                    if (!known) found.add(tv)
+                coroutineScope {
+                    launch {
+                        runCatching { Diagnostics.upnpSearch(context) { d -> others.add(d) } }
+                    }
+                    Discovery.scan(context) { tv ->
+                        val known = app.devices.any { it.host == tv.host && it.type == tv.type }
+                        if (!known) found.add(tv)
+                    }
                 }
+                // Don't list a device twice if it was recognised as a TV.
+                others.removeAll { o -> found.any { it.host == o.host } || app.devices.any { it.host == o.host } }
                 if (found.isEmpty()) scanMessage =
-                    "No new TVs found. Make sure the TV is switched on and on the same Wi-Fi, or add it manually."
+                    "No TV with a known remote service was found. If your TV is listed under " +
+                        "\"Other devices\" below, tap it to check it. Make sure the TV is switched on, not in standby."
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -155,6 +169,31 @@ fun DeviceListScreen(app: AppState) {
                         )
                     }
                 }
+            }
+            if (others.isNotEmpty()) {
+                item {
+                    Text("Other devices on your network", style = MaterialTheme.typography.titleSmall,
+                        modifier = Modifier.padding(top = 8.dp))
+                }
+                items(others, key = { "upnp/${it.host}" }) { d ->
+                    OutlinedCard(Modifier.fillMaxWidth().clickable { app.go(Screen.Diagnose(d.host)) }) {
+                        Column(Modifier.padding(12.dp)) {
+                            Text(
+                                (if (d.looksLikeTv) "📺 " else "") + d.name,
+                                style = MaterialTheme.typography.titleSmall,
+                            )
+                            Text(
+                                listOf(d.manufacturer, d.model, d.host).filter { it.isNotBlank() }.joinToString(" · ") +
+                                    " · tap to check",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+            }
+            item {
+                TextButton(onClick = { app.go(Screen.Diagnose()) }) { Text("Check an IP address…") }
             }
             item {
                 Text(
